@@ -3,53 +3,37 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/segmentio/kafka-go"
+	"github.com/go-redis/redis"
 	"log"
-	"os"
-	"strconv"
-	"time"
 )
-
-const (
-	topic          = "foo"
-	broker1Address = "localhost:9092"
-)
-
-func produce(ctx context.Context) {
-	i := 0
-	w := kafka.NewWriter(kafka.WriterConfig{Brokers: []string{broker1Address},
-		Topic: topic})
-
-	for {
-		err := w.WriteMessages(ctx, kafka.Message{Key: []byte(strconv.Itoa(i)), Value: []byte("this is message" + strconv.Itoa(i))})
-		if err != nil {
-			panic("could not write message" + err.Error())
-		}
-		fmt.Println("writes:", i)
-		i++
-		time.Sleep(time.Second)
-	}
-}
-
-func consume(ctx context.Context) {
-	l := log.New(os.Stdout, "kafka reader: ", 0)
-	r := kafka.NewReader(kafka.ReaderConfig{
-		Brokers: []string{broker1Address},
-		Topic:   topic,
-		Logger:  l,
-	})
-
-	for {
-		msg, err := r.ReadMessage(ctx)
-		if err != nil {
-			panic("could not read message" + err.Error())
-		}
-		fmt.Println("received: ", string(msg.Value))
-	}
-}
 
 func main() {
 	ctx := context.Background()
+	keyChan := make(chan string)
+	valueChan := make(chan string)
+
 	go produce(ctx)
-	consume(ctx)
+	go func() {
+		consume(ctx, keyChan, valueChan)
+	}()
+
+	client := redis.NewClient(&redis.Options{Addr: "127.0.0.1:6379", Password: "redisPassword", DB: 10})
+	pong, err := client.Ping().Result()
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(pong)
+	for {
+		fmt.Println("come to for loop")
+		select {
+		case <-keyChan:
+			if <-valueChan != "" {
+				fmt.Println("valueChan is not nil")
+				redisSet(client, <-keyChan, <-valueChan)
+			}
+			fmt.Println("valueChan is  = ", redisGet(client, <-keyChan))
+
+		}
+	}
+
 }
